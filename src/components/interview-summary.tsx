@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, MessageCircle, HelpCircle, Mic, Star, Percent, TrendingUp, ExternalLink, Target, BookOpen, Lightbulb } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
 
 interface InterviewData {
   question: string;
@@ -117,7 +118,9 @@ export function InterviewSummary({ interviewData }: InterviewSummaryProps) {
                           <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
                             <Target className="h-4 w-4 text-blue-500" /> Expected Key Points:
                           </h4>
-                          <p className="text-sm whitespace-pre-wrap bg-blue-50 border border-blue-100 p-2 rounded-sm">{item.evaluation.expectedAnswerElements}</p>
+                          <div className="text-sm bg-blue-50 border border-blue-100 p-2 rounded-sm prose prose-sm max-w-none">
+                            <ReactMarkdown>{item.evaluation.expectedAnswerElements}</ReactMarkdown>
+                          </div>
                         </div>
                       )}
                       {item.evaluation.suggestedResources && item.evaluation.suggestedResources.length > 0 && (

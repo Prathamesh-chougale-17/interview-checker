@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Lightbulb, MessageSquareText, CheckCircle2, Star, HelpCircle, BookOpen, ExternalLink, Target } from "lucide-react";
+import ReactMarkdown from 'react-markdown';
 
 interface AnswerEvaluationProps {
   questionText?: string | null;
@@ -99,9 +100,9 @@ export function AnswerEvaluation({
               <Target className="h-5 w-5 text-blue-500" />
               Expected Key Points
             </h3>
-            <p className="text-foreground leading-relaxed whitespace-pre-wrap bg-blue-50 border border-blue-200 p-3 rounded-md">
-              {expectedAnswerElements}
-            </p>
+            <div className="text-foreground leading-relaxed bg-blue-50 border border-blue-200 p-3 rounded-md prose prose-sm max-w-none">
+              <ReactMarkdown>{expectedAnswerElements}</ReactMarkdown>
+            </div>
           </div>
         )}
         
