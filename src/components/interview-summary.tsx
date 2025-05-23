@@ -1,15 +1,15 @@
 
-import type { EvaluateAnswerOutput } from "@/ai/flows/evaluate-answer";
+import type { EvaluateAnswerOutput, SuggestedResourceSchema } from "@/ai/flows/evaluate-answer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, MessageCircle, HelpCircle, Mic, Star, Percent, TrendingUp, ExternalLink } from "lucide-react";
+import { CheckCircle, MessageCircle, HelpCircle, Mic, Star, Percent, TrendingUp, ExternalLink, Target, BookOpen, Lightbulb } from "lucide-react";
 
 interface InterviewData {
   question: string;
   guidanceLink?: string;
   transcribedAnswer: string | null;
-  evaluation: EvaluateAnswerOutput | null; // Contains score
+  evaluation: EvaluateAnswerOutput | null; // Contains score, expectedAnswerElements, suggestedResources
   audioUri?: string | null; 
 }
 
@@ -80,10 +80,10 @@ export function InterviewSummary({ interviewData }: InterviewSummaryProps) {
                   )}
                   {item.transcribedAnswer && (
                     <div>
-                      <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground">
+                      <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
                         <Mic className="h-4 w-4" /> Your Answer:
                       </h4>
-                      <blockquote className="pl-3 border-l-2 border-primary/30 italic text-foreground bg-primary/5 p-2 rounded-sm">
+                      <blockquote className="pl-3 border-l-2 border-primary/30 italic text-foreground bg-primary/5 p-2 rounded-sm text-sm">
                         {item.transcribedAnswer}
                       </blockquote>
                     </div>
@@ -97,14 +97,14 @@ export function InterviewSummary({ interviewData }: InterviewSummaryProps) {
                   {item.evaluation && (
                     <>
                       <div>
-                        <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground">
-                          <Star className="h-4 w-4 text-yellow-500" /> Evaluation:
+                        <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
+                          <Star className="h-4 w-4 text-yellow-500" /> AI Evaluation:
                         </h4>
                         <p className="text-sm whitespace-pre-wrap bg-green-50 border border-green-100 p-2 rounded-sm">{item.evaluation.evaluation}</p>
                       </div>
                        {item.evaluation.score !== null && item.evaluation.score !== undefined && (
                          <div className="mt-2">
-                            <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground">
+                            <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
                                 <Percent className="h-4 w-4 text-blue-500"/> Score:
                             </h4>
                             <p className={`text-sm font-bold p-2 rounded-sm inline-block text-white ${getScoreColor(item.evaluation.score)}`}>
@@ -112,12 +112,44 @@ export function InterviewSummary({ interviewData }: InterviewSummaryProps) {
                             </p>
                          </div>
                        )}
-                      <div>
-                        <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground">
-                           <MessageCircle className="h-4 w-4" /> Suggested Follow-up:
-                        </h4>
-                        <p className="text-sm whitespace-pre-wrap bg-orange-50 border border-orange-100 p-2 rounded-sm">{item.evaluation.followUpQuestion}</p>
-                      </div>
+                      {item.evaluation.expectedAnswerElements && (
+                        <div className="mt-2">
+                          <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
+                            <Target className="h-4 w-4 text-blue-500" /> Expected Key Points:
+                          </h4>
+                          <p className="text-sm whitespace-pre-wrap bg-blue-50 border border-blue-100 p-2 rounded-sm">{item.evaluation.expectedAnswerElements}</p>
+                        </div>
+                      )}
+                      {item.evaluation.suggestedResources && item.evaluation.suggestedResources.length > 0 && (
+                        <div className="mt-2">
+                          <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
+                            <BookOpen className="h-4 w-4 text-purple-500" /> Suggested Resources:
+                          </h4>
+                          <ul className="space-y-1 pl-2">
+                            {item.evaluation.suggestedResources.map((resource, rIndex) => (
+                              <li key={rIndex} className="text-sm">
+                                <a 
+                                  href={resource.url} 
+                                  target="_blank" 
+                                  rel="noopener noreferrer" 
+                                  className="text-purple-600 hover:text-purple-800 hover:underline flex items-center gap-1"
+                                >
+                                  {resource.title}
+                                  <ExternalLink className="h-3 w-3" />
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {item.evaluation.followUpQuestion && (
+                        <div className="mt-2">
+                          <h4 className="font-semibold mb-1 flex items-center gap-2 text-muted-foreground text-sm">
+                            <Lightbulb className="h-4 w-4 text-accent" /> Suggested Follow-up:
+                          </h4>
+                          <p className="text-sm whitespace-pre-wrap bg-orange-50 border border-orange-100 p-2 rounded-sm">{item.evaluation.followUpQuestion}</p>
+                        </div>
+                      )}
                     </>
                   )}
                   {!item.transcribedAnswer && !item.evaluation && (

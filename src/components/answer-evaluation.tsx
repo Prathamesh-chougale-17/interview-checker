@@ -1,8 +1,9 @@
 
+import type { SuggestedResourceSchema } from "@/ai/flows/evaluate-answer";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Lightbulb, MessageSquareText, CheckCircle2, Star, HelpCircle } from "lucide-react";
+import { Lightbulb, MessageSquareText, CheckCircle2, Star, HelpCircle, BookOpen, ExternalLink, Target } from "lucide-react";
 
 interface AnswerEvaluationProps {
   questionText?: string | null;
@@ -10,10 +11,21 @@ interface AnswerEvaluationProps {
   evaluation: string | null;
   score: number | null;
   followUpQuestion: string | null;
+  expectedAnswerElements?: string | null;
+  suggestedResources?: SuggestedResourceSchema[] | null;
 }
 
-export function AnswerEvaluation({ questionText, transcribedText, evaluation, score, followUpQuestion }: AnswerEvaluationProps) {
-  if (!transcribedText && !evaluation && !followUpQuestion && score === null) {
+export function AnswerEvaluation({ 
+  questionText, 
+  transcribedText, 
+  evaluation, 
+  score, 
+  followUpQuestion,
+  expectedAnswerElements,
+  suggestedResources 
+}: AnswerEvaluationProps) {
+
+  if (!transcribedText && !evaluation && !followUpQuestion && score === null && !expectedAnswerElements && !suggestedResources) {
     return null; 
   }
 
@@ -77,6 +89,44 @@ export function AnswerEvaluation({ questionText, transcribedText, evaluation, sc
             <p className="text-foreground leading-relaxed whitespace-pre-wrap bg-green-50 border border-green-200 p-3 rounded-md">
               {evaluation}
             </p>
+          </div>
+        )}
+
+        {expectedAnswerElements && (
+          <div>
+            <Separator className="my-4" />
+            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <Target className="h-5 w-5 text-blue-500" />
+              Expected Key Points
+            </h3>
+            <p className="text-foreground leading-relaxed whitespace-pre-wrap bg-blue-50 border border-blue-200 p-3 rounded-md">
+              {expectedAnswerElements}
+            </p>
+          </div>
+        )}
+        
+        {suggestedResources && suggestedResources.length > 0 && (
+          <div>
+            <Separator className="my-4" />
+            <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+              <BookOpen className="h-5 w-5 text-purple-500" />
+              Suggested Learning Resources
+            </h3>
+            <ul className="space-y-2">
+              {suggestedResources.map((resource, index) => (
+                <li key={index} className="text-sm bg-purple-50 border border-purple-200 p-3 rounded-md">
+                  <a 
+                    href={resource.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="font-medium text-purple-700 hover:text-purple-900 hover:underline flex items-center gap-1"
+                  >
+                    {resource.title}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 
