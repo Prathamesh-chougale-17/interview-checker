@@ -1,7 +1,7 @@
 // src/ai/flows/evaluate-answer.ts
 'use server';
 /**
- * @fileOverview Evaluates user answers to interview questions, providing feedback and follow-up questions.
+ * @fileOverview Evaluates user answers to interview questions, providing feedback, a score, and follow-up questions.
  *
  * - evaluateAnswer - A function that evaluates the answer.
  * - EvaluateAnswerInput - The input type for the evaluateAnswer function.
@@ -23,7 +23,8 @@ const FollowUpQuestionSuggestionSchema = z.object({
 });
 
 const EvaluateAnswerOutputSchema = z.object({
-  evaluation: z.string().describe('The evaluation of the answer.'),
+  evaluation: z.string().describe('The textual evaluation of the answer.'),
+  score: z.number().min(0).max(10).describe('A numerical score from 0 to 10 for the answer. 0 is poor, 10 is excellent.'),
   followUpQuestion: z.string().describe('A suggested follow-up question.'),
 });
 export type EvaluateAnswerOutput = z.infer<typeof EvaluateAnswerOutputSchema>;
@@ -40,8 +41,10 @@ const followUpQuestionSuggestionTool = ai.defineTool({
   async run(input) {
     // Just return the follow up question. The LLM will handle the
     // tool calling and formatting of the response.
+    // This tool isn't strictly necessary for generating a follow-up as part of the main prompt,
+    // but demonstrates tool use. For more complex follow-up logic, it could be expanded.
     return {
-      followUpQuestion: `Based on the question, answer and resume, what follow up question would you ask? The question was: ${input.question}. The answer was: ${input.answer}. Here is the resume data: ${input.resumeData}`,
+      followUpQuestion: `Based on the question ("${input.question}"), the answer ("${input.answer}"), and the resume ("${input.resumeData}"), what is a good follow-up question to ask?`,
     };
   },
 });
@@ -51,7 +54,7 @@ const evaluateAnswerPrompt = ai.definePrompt({
   tools: [followUpQuestionSuggestionTool],
   input: {schema: EvaluateAnswerInputSchema},
   output: {schema: EvaluateAnswerOutputSchema},
-  prompt: `You are an expert interview evaluator.  Please evaluate the candidate's answer to the question, taking into account their resume data.
+  prompt: `You are an expert interview evaluator. Please evaluate the candidate's answer to the question, taking into account their resume data.
 
     Question: {{{question}}}
     Answer: {{{answer}}}
@@ -63,9 +66,12 @@ const evaluateAnswerPrompt = ai.definePrompt({
     - Did the candidate use specific examples to support their answer?
     - How does the answer relate to the information provided in their resume?
 
-    In addition to your evaluation, use the followUpQuestionSuggestion tool to suggest ONE follow-up question that would help you better assess the candidate's skills and experience. The tool's description is: Suggests a relevant follow-up question based on the answer and the resume.
+    Provide a textual evaluation.
+    Also, provide a numerical score from 0 to 10 for the answer, where 0 is poor and 10 is excellent.
 
-    Return the evaluation and the follow up question.
+    In addition to your evaluation and score, use the followUpQuestionSuggestion tool to suggest ONE follow-up question that would help you better assess the candidate's skills and experience. The tool's description is: Suggests a relevant follow-up question based on the answer and the resume.
+
+    Return the evaluation, the score, and the follow up question.
     `,
 });
 

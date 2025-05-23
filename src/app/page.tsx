@@ -1,9 +1,10 @@
+
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
 import type { ParseResumeOutput } from '@/ai/flows/parse-resume';
 import { parseResume } from '@/ai/flows/parse-resume';
-import type { GenerateInterviewQuestionsOutput } from '@/ai/flows/generate-interview-questions';
+import type { GenerateInterviewQuestionsOutput, QuestionObjectSchema } from '@/ai/flows/generate-interview-questions';
 import { generateInterviewQuestions } from '@/ai/flows/generate-interview-questions';
 import type { TranscribeAnswerOutput } from '@/ai/flows/transcribe-answer';
 import { transcribeAnswer } from '@/ai/flows/transcribe-answer';
@@ -17,15 +18,18 @@ import { AnswerEvaluation } from '@/components/answer-evaluation';
 import { LoadingIndicator } from '@/components/loading-indicator';
 import { InterviewSummary } from '@/components/interview-summary';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, Brain, Mic, Volume2, ChevronRight, RotateCcw, CheckCircle, ListChecks, Info, AlertTriangle } from 'lucide-react';
+import { FileText, Brain, Mic, Volume2, ChevronRight, RotateCcw, CheckCircle, ListChecks, Info, AlertTriangle, ExternalLink, HelpCircle, Wand2 } from 'lucide-react';
 
 type InterviewStage =
   | 'INITIAL'
   | 'RESUME_PARSING'
   | 'RESUME_PARSED'
+  | 'AWAITING_NUM_QUESTIONS' // New stage
   | 'GENERATING_QUESTIONS'
   | 'QUESTIONS_READY'
   | 'INTERVIEWING'
@@ -35,17 +39,19 @@ type InterviewStage =
   | 'ERROR_STATE';
 
 interface InterviewLog {
-  question: string;
+  question: string; // Just the question text for the log
+  guidanceLink?: string; // Optional, if we decide to log it
   audioUri: string | null;
   transcribedAnswer: string | null;
-  evaluation: EvaluateAnswerOutput | null;
+  evaluation: EvaluateAnswerOutput | null; // Includes score now
 }
 
 export default function InterviewPage() {
   const [stage, setStage] = useState<InterviewStage>('INITIAL');
   const [parsedResumeData, setParsedResumeData] = useState<ParseResumeOutput | null>(null);
   const [parsedResumeString, setParsedResumeString] = useState<string>('');
-  const [generatedQuestions, setGeneratedQuestions] = useState<string[]>([]);
+  const [numberOfQuestions, setNumberOfQuestions] = useState<number>(5);
+  const [generatedQuestions, setGeneratedQuestions] = useState<QuestionObjectSchema[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   
   const [currentRecordedAudioUri, setCurrentRecordedAudioUri] = useState<string | null>(null);
@@ -87,10 +93,9 @@ export default function InterviewPage() {
         const resumeDataUri = reader.result as string;
         const parsedData = await parseResume({ resumeDataUri });
         setParsedResumeData(parsedData);
-        // Create a string summary for AI context. Adjust as needed for brevity/completeness.
         const summaryString = `Work Experience: ${parsedData.workExperience.join(', ') || 'N/A'}. Skills: ${parsedData.skills.join(', ') || 'N/A'}. Projects: ${parsedData.projects.join(', ') || 'N/A'}.`;
         setParsedResumeString(summaryString);
-        setStage('RESUME_PARSED');
+        setStage('AWAITING_NUM_QUESTIONS'); // Go to new stage
         setIsLoading(false);
         toast({ title: "Resume Parsed", description: "Your resume has been successfully parsed." });
       };
@@ -106,13 +111,20 @@ export default function InterviewPage() {
       handleError('Cannot generate questions without parsed resume data.');
       return;
     }
+    if (numberOfQuestions <= 0 || numberOfQuestions > 20) {
+        handleError('Please enter a valid number of questions (1-20).');
+        return;
+    }
     setIsLoading(true);
     setLoadingMessage('Generating interview questions...');
     setStage('GENERATING_QUESTIONS');
     setErrorMessage(null);
 
     try {
-      const result: GenerateInterviewQuestionsOutput = await generateInterviewQuestions({ resumeData: parsedResumeString });
+      const result: GenerateInterviewQuestionsOutput = await generateInterviewQuestions({ 
+        resumeData: parsedResumeString,
+        numberOfQuestions: numberOfQuestions 
+      });
       setGeneratedQuestions(result.questions);
       setStage('QUESTIONS_READY');
       setIsLoading(false);
@@ -120,7 +132,7 @@ export default function InterviewPage() {
     } catch (error) {
       handleError('Failed to generate interview questions.', error);
     }
-  }, [parsedResumeString, handleError, toast]);
+  }, [parsedResumeString, handleError, toast, numberOfQuestions]);
 
   const handleStartInterview = () => {
     setCurrentQuestionIndex(0);
@@ -137,20 +149,19 @@ export default function InterviewPage() {
     setLoadingMessage('Processing your answer (transcribing & evaluating)...');
     setStage('PROCESSING_ANSWER');
     setErrorMessage(null);
+    const currentQuestionObject = generatedQuestions[currentQuestionIndex];
 
     try {
-      // Transcribe
       setLoadingMessage('Transcribing your answer...');
       const transcriptionResult: TranscribeAnswerOutput = await transcribeAnswer({ audioDataUri });
       setCurrentTranscribedAnswer(transcriptionResult.transcription);
       
-      // Evaluate
       setLoadingMessage('Evaluating your answer...');
-      if (!parsedResumeString || !generatedQuestions[currentQuestionIndex]) {
+      if (!parsedResumeString || !currentQuestionObject?.question) {
         throw new Error("Missing data for evaluation.");
       }
       const evaluationResult: EvaluateAnswerOutput = await evaluateAnswer({
-        question: generatedQuestions[currentQuestionIndex],
+        question: currentQuestionObject.question,
         answer: transcriptionResult.transcription,
         resumeData: parsedResumeString,
       });
@@ -159,7 +170,8 @@ export default function InterviewPage() {
       setInterviewLog(prevLog => [
         ...prevLog,
         {
-          question: generatedQuestions[currentQuestionIndex],
+          question: currentQuestionObject.question,
+          guidanceLink: currentQuestionObject.guidanceLink,
           audioUri: audioDataUri,
           transcribedAnswer: transcriptionResult.transcription,
           evaluation: evaluationResult,
@@ -172,14 +184,14 @@ export default function InterviewPage() {
 
     } catch (error) {
       handleError('Failed to process your answer.', error);
-      // Keep audio URI so user doesn't lose it, allow retry or manual entry? For now, error state.
-      setInterviewLog(prevLog => [ // Log with partial data on error
+      setInterviewLog(prevLog => [
         ...prevLog,
         {
-          question: generatedQuestions[currentQuestionIndex],
+          question: currentQuestionObject?.question || "Unknown Question",
+          guidanceLink: currentQuestionObject?.guidanceLink,
           audioUri: audioDataUri,
-          transcribedAnswer: currentTranscribedAnswer, // Might be null if transcription failed
-          evaluation: null, // Evaluation definitely failed or didn't run
+          transcribedAnswer: currentTranscribedAnswer, 
+          evaluation: null,
         }
       ]);
     }
@@ -198,9 +210,10 @@ export default function InterviewPage() {
   };
 
   const handleSpeakQuestion = () => {
-    if (!speechSynthesisSupported || !generatedQuestions[currentQuestionIndex]) return;
+    const currentQuestionText = generatedQuestions[currentQuestionIndex]?.question;
+    if (!speechSynthesisSupported || !currentQuestionText) return;
     try {
-      const utterance = new SpeechSynthesisUtterance(generatedQuestions[currentQuestionIndex]);
+      const utterance = new SpeechSynthesisUtterance(currentQuestionText);
       speechSynthesis.speak(utterance);
     } catch (error) {
       console.error("Error with speech synthesis:", error);
@@ -214,6 +227,7 @@ export default function InterviewPage() {
     setParsedResumeString('');
     setGeneratedQuestions([]);
     setCurrentQuestionIndex(0);
+    setNumberOfQuestions(5);
     setCurrentRecordedAudioUri(null);
     setCurrentTranscribedAnswer(null);
     setCurrentEvaluation(null);
@@ -251,24 +265,38 @@ export default function InterviewPage() {
       case 'INITIAL':
         return <ResumeUploader onFileUpload={handleResumeUpload} isLoading={isLoading} />;
       
-      case 'RESUME_PARSED':
-        return (
+      case 'AWAITING_NUM_QUESTIONS':
+         return (
           <Card className="w-full max-w-lg mx-auto text-center shadow-lg">
             <CardHeader>
-              <CardTitle className="flex items-center justify-center gap-2"><FileText className="h-6 w-6 text-primary" />Resume Parsed Successfully!</CardTitle>
-              <CardDescription>We've extracted key information from your resume.</CardDescription>
+              <CardTitle className="flex items-center justify-center gap-2"><FileText className="h-6 w-6 text-primary" />Resume Parsed!</CardTitle>
+              <CardDescription>We've extracted key information. Now, how many questions would you like?</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {parsedResumeData && (
                 <div className="text-left text-sm space-y-2 bg-muted/50 p-4 rounded-md border">
                   <p><strong>Skills:</strong> {parsedResumeData.skills.join(', ') || 'Not found'}</p>
-                  <p><strong>Experience Snippet:</strong> {parsedResumeData.workExperience[0] || 'Not found'}...</p>
+                  <p><strong>Experience Snippet:</strong> {parsedResumeData.workExperience[0]?.substring(0,100) || 'Not found'}...</p>
                 </div>
               )}
-              <Button onClick={handleGenerateQuestions} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground">
-                <Brain className="mr-2 h-5 w-5" /> Generate Interview Questions
-              </Button>
+              <div className="space-y-2">
+                <Label htmlFor="num-questions" className="text-left block">Number of Questions (1-20):</Label>
+                <Input
+                  id="num-questions"
+                  type="number"
+                  value={numberOfQuestions}
+                  onChange={(e) => setNumberOfQuestions(parseInt(e.target.value, 10))}
+                  min="1"
+                  max="20"
+                  className="w-full"
+                />
+              </div>
             </CardContent>
+            <CardFooter>
+              <Button onClick={handleGenerateQuestions} className="w-full bg-accent hover:bg-accent/90 text-accent-foreground">
+                <Wand2 className="mr-2 h-5 w-5" /> Generate Interview Questions
+              </Button>
+            </CardFooter>
           </Card>
         );
 
@@ -288,18 +316,29 @@ export default function InterviewPage() {
         );
 
       case 'INTERVIEWING':
+        const currentQuestionObject = generatedQuestions[currentQuestionIndex];
+        if (!currentQuestionObject) return <LoadingIndicator message="Loading question..." />;
         return (
           <Card className="w-full max-w-2xl mx-auto shadow-xl">
             <CardHeader>
               <CardTitle>Question {currentQuestionIndex + 1} of {generatedQuestions.length}</CardTitle>
               <CardDescription className="text-xl py-4 text-foreground leading-relaxed">
-                {generatedQuestions[currentQuestionIndex]}
+                {currentQuestionObject.question}
               </CardDescription>
-              {speechSynthesisSupported && (
-                <Button onClick={handleSpeakQuestion} variant="outline" size="sm" className="mt-2 self-start">
-                  <Volume2 className="mr-2 h-4 w-4" /> Read Question Aloud
-                </Button>
-              )}
+              <div className="flex flex-col sm:flex-row gap-2 items-start">
+                {speechSynthesisSupported && (
+                  <Button onClick={handleSpeakQuestion} variant="outline" size="sm" className="self-start">
+                    <Volume2 className="mr-2 h-4 w-4" /> Read Aloud
+                  </Button>
+                )}
+                {currentQuestionObject.guidanceLink && (
+                  <Button asChild variant="outline" size="sm" className="self-start">
+                    <a href={currentQuestionObject.guidanceLink} target="_blank" rel="noopener noreferrer">
+                      <HelpCircle className="mr-2 h-4 w-4" /> Get Guidance <ExternalLink className="ml-1 h-3 w-3"/>
+                    </a>
+                  </Button>
+                )}
+              </div>
                {!speechSynthesisSupported && (
                 <Alert variant="default" className="mt-2 text-sm">
                   <Info className="h-4 w-4"/>
@@ -319,8 +358,10 @@ export default function InterviewPage() {
         return (
           <div className="w-full max-w-2xl mx-auto space-y-6">
             <AnswerEvaluation 
+              questionText={generatedQuestions[currentQuestionIndex]?.question}
               transcribedText={currentTranscribedAnswer}
               evaluation={currentEvaluation?.evaluation ?? null}
+              score={currentEvaluation?.score ?? null}
               followUpQuestion={currentEvaluation?.followUpQuestion ?? null}
             />
             <Button onClick={handleNextQuestion} size="lg" className="w-full">
