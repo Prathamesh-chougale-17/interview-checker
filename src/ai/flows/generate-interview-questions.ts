@@ -22,7 +22,7 @@ export type GenerateInterviewQuestionsInput = z.infer<typeof GenerateInterviewQu
 
 const QuestionObjectSchema = z.object({
   question: z.string().describe('The interview question text.'),
-  guidanceLink: z.string().url().describe('A URL (e.g., Google search) to help understand the question.'),
+  guidanceLink: z.string().describe('A URL (e.g., Google search) to help understand the question.'),
 });
 
 const GenerateInterviewQuestionsOutputSchema = z.object({
