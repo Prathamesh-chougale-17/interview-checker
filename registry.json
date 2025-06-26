@@ -186,7 +186,5 @@
       "type": "registry:lib",
       "target": "lib/utils.ts"
     }
-  ],
-  "author": "Prathamesh Chougale",
-  "title": "Complete Project"
+  ]
 }
