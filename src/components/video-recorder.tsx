@@ -1,11 +1,11 @@
+
 "use client";
 
 import type { FC } from 'react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
-import { Mic, StopCircle, AlertTriangle, Video, VideoOff, Loader2 } from 'lucide-react';
+import { Mic, StopCircle, Video, VideoOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { FaceLandmarker, FilesetResolver, FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
 interface VideoRecorderProps {
@@ -30,12 +30,12 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
   
   const { toast } = useToast();
 
-  // Initialize MediaPipe FaceLandmarker
+  // 1. Initialize MediaPipe FaceLandmarker
   useEffect(() => {
     const createFaceLandmarker = async () => {
       try {
         const filesetResolver = await FilesetResolver.forVisionTasks(
-          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
         );
         const landmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
           baseOptions: {
@@ -51,147 +51,133 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
         console.error("Error creating FaceLandmarker:", error);
         toast({
           title: "AI Model Error",
-          description: "Could not load facial recognition models. Performance analysis will be disabled.",
+          description: "Could not load facial recognition models.",
           variant: "destructive"
         });
       } finally {
         setIsInitializing(false);
       }
     };
-
+    
     if (typeof window !== 'undefined' && (!navigator.mediaDevices || !window.MediaRecorder)) {
-      setIsBrowserSupported(false);
-      setIsInitializing(false);
-      toast({
-        title: "Browser Not Supported",
-        description: "Video recording is not supported by your browser.",
-        variant: "destructive",
-        duration: Infinity,
-      });
-      return;
+        setIsBrowserSupported(false);
+        setIsInitializing(false);
+        return;
     }
 
     createFaceLandmarker();
   }, [toast]);
   
-  const getCameraPermission = useCallback(async () => {
-      if (!isBrowserSupported || hasCameraPermission) return;
-      
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-        }
-        setHasCameraPermission(true);
-      } catch (error) {
-        console.error('Error accessing camera:', error);
-        setHasCameraPermission(false);
-        toast({
-          variant: 'destructive',
-          title: 'Camera Access Denied',
-          description: 'Please enable camera permissions in your browser settings to use this app.',
-        });
-      }
-  }, [isBrowserSupported, hasCameraPermission, toast]);
-
-  // Request permission on component mount
-  useEffect(() => {
-    getCameraPermission();
-
-    // Cleanup stream on component unmount
-    return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if(animationFrameIdRef.current) {
-        cancelAnimationFrame(animationFrameIdRef.current);
-      }
-    };
-  }, [getCameraPermission]);
-
+  // 2. Main prediction loop
   const predictWebcam = useCallback(() => {
-    if (!isRecording || !faceLandmarker || !videoRef.current || videoRef.current.paused || videoRef.current.ended) {
+    const video = videoRef.current;
+    if (!video || !faceLandmarker) {
       return;
     }
-  
-    const startTimeMs = performance.now();
-    const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(videoRef.current, startTimeMs);
-  
-    if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
-      // We are only detecting one face, so we take the first element
-      facialDataRef.current.push({
-        timestamp: Date.now(),
-        blendshapes: results.faceBlendshapes[0].categories,
-      });
-    } else {
-      // Push null if no face is detected
-      facialDataRef.current.push(null);
-    }
-  
-    // Continue the loop
-    animationFrameIdRef.current = requestAnimationFrame(predictWebcam);
-  }, [isRecording, faceLandmarker]);
 
-  const startRecording = useCallback(async () => {
-    if (!isBrowserSupported || !hasCameraPermission || !streamRef.current || !faceLandmarker) {
-        toast({ title: "Cannot Start Recording", description: "Camera is not ready, permissions denied, or AI models are not loaded.", variant: "destructive" });
-        return;
+    // If the video is playing, start detecting
+    if (video.currentTime > 0) {
+      const startTimeMs = performance.now();
+      const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(video, startTimeMs);
+
+      // If recording, save the results
+      if (isRecording && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+        facialDataRef.current.push({
+          timestamp: Date.now(),
+          blendshapes: results.faceBlendshapes[0].categories,
+        });
+      } else if (isRecording) {
+        facialDataRef.current.push(null);
+      }
     }
-    setVideoDataUri(null); // Clear previous recording
-    facialDataRef.current = [];
+
+    // Call this function again to keep predicting when the browser is ready.
+    animationFrameIdRef.current = window.requestAnimationFrame(predictWebcam);
+  }, [faceLandmarker, isRecording]);
+
+  // 3. Get camera permissions and start the prediction loop
+  const enableCam = useCallback(async () => {
+    if (!faceLandmarker || hasCameraPermission) return;
 
     try {
-      mediaRecorderRef.current = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' });
-      videoChunksRef.current = [];
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.addEventListener("loadeddata", () => {
+            animationFrameIdRef.current = window.requestAnimationFrame(predictWebcam);
+        });
+      }
+      setHasCameraPermission(true);
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      setHasCameraPermission(false);
+      toast({
+        variant: 'destructive',
+        title: 'Camera Access Denied',
+        description: 'Please enable camera permissions in your browser settings.',
+      });
+    }
+  }, [faceLandmarker, hasCameraPermission, predictWebcam, toast]);
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
+  useEffect(() => {
+    if (!isInitializing) {
+        enableCam();
+    }
+    // Cleanup on unmount
+    return () => {
+        if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+        }
+        if (animationFrameIdRef.current) {
+            cancelAnimationFrame(animationFrameIdRef.current);
+        }
+    }
+  }, [isInitializing, enableCam]);
+
+
+  const startRecording = () => {
+    if (!streamRef.current) {
+        toast({ title: "Camera not ready", variant: "destructive" });
+        return;
+    }
+    setVideoDataUri(null);
+    facialDataRef.current = [];
+    videoChunksRef.current = [];
+    
+    mediaRecorderRef.current = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' });
+    
+    mediaRecorderRef.current.ondataavailable = (event) => {
         videoChunksRef.current.push(event.data);
-      };
+    };
 
-      mediaRecorderRef.current.onstop = () => {
-        if(animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
-        animationFrameIdRef.current = null;
-
+    mediaRecorderRef.current.onstop = () => {
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64String = reader.result as string;
-          setVideoDataUri(base64String);
-          onRecordingComplete(base64String, facialDataRef.current);
+            const base64String = reader.result as string;
+            setVideoDataUri(base64String);
+            onRecordingComplete(base64String, facialDataRef.current);
         };
         reader.readAsDataURL(videoBlob);
-      };
+    };
 
-      mediaRecorderRef.current.start();
-      setIsRecording(true);
-      // Start the prediction loop
-      animationFrameIdRef.current = requestAnimationFrame(predictWebcam);
-    } catch (err) {
-      console.error("Error starting recording:", err);
-      if(animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
-      toast({
-        title: "Recording Error",
-        description: "Could not start the video recording.",
-        variant: "destructive",
-      });
-      setIsRecording(false);
-    }
-  }, [onRecordingComplete, toast, isBrowserSupported, hasCameraPermission, faceLandmarker, predictWebcam]);
+    mediaRecorderRef.current.start();
+    setIsRecording(true);
+  };
 
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
+  const stopRecording = () => {
+    if (mediaRecorderRef.current) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-      // The predictWebcam loop will stop itself because isRecording is false
     }
-  }, [isRecording]);
+  };
 
   return (
     <div className="flex flex-col items-center space-y-4 p-4 border rounded-lg shadow-sm bg-muted/20">
       <div className="w-full aspect-video bg-black rounded-md overflow-hidden relative flex items-center justify-center">
         <video ref={videoRef} className="w-full h-full object-cover" autoPlay muted playsInline />
-        {(isInitializing || (hasCameraPermission && !faceLandmarker)) && (
+        {isInitializing && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/50 p-4">
                 <Loader2 className="h-8 w-8 animate-spin mb-2" />
                 <p>Loading AI models...</p>
@@ -201,8 +187,8 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
              <div className="absolute inset-0 flex flex-col items-center justify-center text-destructive-foreground bg-destructive/80 p-4 text-center">
                 <VideoOff className="h-12 w-12 mb-4" />
                 <h3 className="font-bold">Camera Access Required</h3>
-                <p className="text-sm">Please allow camera and microphone access to record your answer.</p>
-                <Button onClick={getCameraPermission} variant="secondary" size="sm" className="mt-4">Retry Permissions</Button>
+                <p className="text-sm">Please allow camera and microphone access.</p>
+                <Button onClick={enableCam} variant="secondary" size="sm" className="mt-4">Retry Permissions</Button>
             </div>
         )}
          {hasCameraPermission === null && !isInitializing && (
@@ -215,7 +201,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
 
       <Button
         onClick={isRecording ? stopRecording : startRecording}
-        disabled={isProcessing || !hasCameraPermission || hasCameraPermission === null || !faceLandmarker || isInitializing}
+        disabled={isProcessing || !hasCameraPermission || isInitializing}
         variant={isRecording ? "destructive" : "default"}
         size="lg"
         className="w-full"
@@ -234,13 +220,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       </Button>
 
       {isBrowserSupported === false && (
-          <Alert variant="destructive">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>Browser Not Supported</AlertTitle>
-            <AlertDescription>
-                Video recording is not available in your browser. Please try Chrome or Firefox.
-            </AlertDescription>
-         </Alert>
+          <p className='text-xs text-destructive'>Video recording is not supported in your browser.</p>
       )}
 
       {videoDataUri && !isRecording && !isProcessing && (
