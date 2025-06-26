@@ -85,21 +85,25 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
 
     // If the video is playing, start detecting
     if (video.readyState >= 2) { // Check if video has enough data to play
-      const startTimeMs = performance.now();
-      const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(video, startTimeMs);
-
-      // Add a null check for robustness
-      if(results) {
-        // If recording, save the results
-        if (isRecordingRef.current && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
-          facialDataRef.current.push({
-            timestamp: Date.now(),
-            blendshapes: results.faceBlendshapes[0].categories,
-          });
-        } else if (isRecordingRef.current) {
-          facialDataRef.current.push(null);
+        try {
+            const startTimeMs = performance.now();
+            const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(video, startTimeMs);
+    
+            // Add a null check for robustness
+            if(results) {
+              // If recording, save the results
+              if (isRecordingRef.current && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+                facialDataRef.current.push({
+                  timestamp: Date.now(),
+                  blendshapes: results.faceBlendshapes[0].categories,
+                });
+              } else if (isRecordingRef.current) {
+                facialDataRef.current.push(null);
+              }
+            }
+        } catch (error) {
+            console.error("Error during facial detection:", error);
         }
-      }
     }
 
     // Call this function again to keep predicting when the browser is ready.
