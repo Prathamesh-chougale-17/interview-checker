@@ -1,10 +1,12 @@
 
 import type { SuggestedResourceSchema } from "@/ai/flows/evaluate-answer";
+import type { AnalyzeVideoPerformanceOutput } from "@/ai/flows/analyze-video-performance";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { Lightbulb, MessageSquareText, CheckCircle2, Star, HelpCircle, BookOpen, ExternalLink, Target } from "lucide-react";
+import { Lightbulb, MessageSquareText, CheckCircle2, Star, HelpCircle, BookOpen, ExternalLink, Target, Smile, AlertCircle, Eye } from "lucide-react";
 import ReactMarkdown from 'react-markdown';
+import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 
 interface AnswerEvaluationProps {
   questionText?: string | null;
@@ -14,6 +16,7 @@ interface AnswerEvaluationProps {
   followUpQuestion: string | null;
   expectedAnswerElements?: string | null;
   suggestedResources?: SuggestedResourceSchema[] | null;
+  videoAnalysis?: AnalyzeVideoPerformanceOutput | null;
 }
 
 export function AnswerEvaluation({ 
@@ -23,10 +26,11 @@ export function AnswerEvaluation({
   score, 
   followUpQuestion,
   expectedAnswerElements,
-  suggestedResources 
+  suggestedResources,
+  videoAnalysis
 }: AnswerEvaluationProps) {
 
-  if (!transcribedText && !evaluation && !followUpQuestion && score === null && !expectedAnswerElements && !suggestedResources) {
+  if (!transcribedText && !evaluation && !followUpQuestion && score === null && !expectedAnswerElements && !suggestedResources && !videoAnalysis) {
     return null; 
   }
 
@@ -50,14 +54,50 @@ export function AnswerEvaluation({
           </div>
           {score !== null && (
              <Badge variant="secondary" className={`px-3 py-1 text-lg font-semibold text-white ${getScoreColor(score)}`}>
-                Score: {score}/10
+                Content Score: {score}/10
              </Badge>
           )}
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
+        {videoAnalysis && (
+            <div>
+              <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
+                <Smile className="h-5 w-5 text-indigo-500" />
+                Visual Performance Analysis
+              </h3>
+              <div className="space-y-4 rounded-md border bg-muted/30 p-4">
+                  <div className="flex justify-between items-center">
+                      <p className="font-medium">Confidence Score</p>
+                      <Badge variant="secondary" className={`text-base ${getScoreColor(videoAnalysis.confidenceScore)}`}>
+                          {videoAnalysis.confidenceScore}/10
+                      </Badge>
+                  </div>
+                   <Separator />
+                   <div>
+                       <p className="font-medium mb-1">Nervousness</p>
+                       <p className="text-sm text-muted-foreground">{videoAnalysis.nervousnessAnalysis}</p>
+                   </div>
+                   <div>
+                       <p className="font-medium mb-1 flex items-center gap-2"><Eye className="h-4 w-4"/>Gaze & Focus</p>
+                       <p className="text-sm text-muted-foreground">{videoAnalysis.gazeAnalysis}</p>
+                   </div>
+                   {videoAnalysis.cheatingSuspicion && (
+                       <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Potential Cheating Flagged</AlertTitle>
+                            <AlertDescription>
+                                The system detected consistent gaze away from the screen, which could indicate reading from notes. Be sure to maintain eye contact with the camera.
+                            </AlertDescription>
+                       </Alert>
+                   )}
+              </div>
+            </div>
+        )}
+
         {questionText && (
            <div>
+            {videoAnalysis && <Separator className="my-4" /> }
             <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <HelpCircle className="h-5 w-5 text-muted-foreground" />
               Question Asked
@@ -69,7 +109,7 @@ export function AnswerEvaluation({
         )}
         {transcribedText && (
           <div>
-            {questionText && <Separator className="my-4" /> }
+            {(questionText || videoAnalysis) && <Separator className="my-4" /> }
             <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <MessageSquareText className="h-5 w-5 text-primary" />
               Your Answer (Transcribed)
@@ -85,7 +125,7 @@ export function AnswerEvaluation({
             <Separator className="my-4" />
             <h3 className="text-lg font-semibold mb-2 flex items-center gap-2">
               <Star className="h-5 w-5 text-yellow-500" />
-              AI Evaluation
+              AI Evaluation (Content)
             </h3>
             <p className="text-foreground leading-relaxed whitespace-pre-wrap bg-green-50 border border-green-200 p-3 rounded-md">
               {evaluation}

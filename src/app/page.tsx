@@ -10,10 +10,15 @@ import type { TranscribeAnswerOutput } from '@/ai/flows/transcribe-answer';
 import { transcribeAnswer } from '@/ai/flows/transcribe-answer';
 import type { EvaluateAnswerOutput } from '@/ai/flows/evaluate-answer';
 import { evaluateAnswer } from '@/ai/flows/evaluate-answer';
+// New import for video analysis
+import type { AnalyzeVideoPerformanceOutput } from '@/ai/flows/analyze-video-performance';
+import { analyzeVideoPerformance } from '@/ai/flows/analyze-video-performance';
+
 
 import { AppHeader } from '@/components/app-header';
 import { ResumeUploader } from '@/components/resume-uploader';
-import { VoiceRecorder } from '@/components/voice-recorder';
+// Renamed import
+import { VideoRecorder } from '@/components/video-recorder';
 import { AnswerEvaluation } from '@/components/answer-evaluation';
 import { LoadingIndicator } from '@/components/loading-indicator';
 import { InterviewSummary } from '@/components/interview-summary';
@@ -23,13 +28,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { FileText, Brain, Mic, Volume2, ChevronRight, RotateCcw, CheckCircle, ListChecks, Info, AlertTriangle, ExternalLink, HelpCircle, Wand2 } from 'lucide-react';
+import { FileText, Brain, Mic, Volume2, ChevronRight, RotateCcw, CheckCircle, ListChecks, Info, AlertTriangle, ExternalLink, HelpCircle, Wand2, Video } from 'lucide-react';
 
 type InterviewStage =
   | 'INITIAL'
   | 'RESUME_PARSING'
   | 'RESUME_PARSED'
-  | 'AWAITING_NUM_QUESTIONS' // New stage
+  | 'AWAITING_NUM_QUESTIONS'
   | 'GENERATING_QUESTIONS'
   | 'QUESTIONS_READY'
   | 'INTERVIEWING'
@@ -39,24 +44,26 @@ type InterviewStage =
   | 'ERROR_STATE';
 
 interface InterviewLog {
-  question: string; // Just the question text for the log
-  guidanceLink?: string; // Optional, if we decide to log it
-  audioUri: string | null;
+  question: string;
+  guidanceLink?: string;
+  videoUri: string | null;
   transcribedAnswer: string | null;
-  evaluation: EvaluateAnswerOutput | null; // Includes score now
+  evaluation: EvaluateAnswerOutput | null;
+  videoAnalysis: AnalyzeVideoPerformanceOutput | null;
 }
 
 export default function InterviewPage() {
   const [stage, setStage] = useState<InterviewStage>('INITIAL');
   const [parsedResumeData, setParsedResumeData] = useState<ParseResumeOutput | null>(null);
   const [parsedResumeString, setParsedResumeString] = useState<string>('');
-  const [numberOfQuestions, setNumberOfQuestions] = useState<number>(5);
+  const [numberOfQuestions, setNumberOfQuestions] = useState<number>(3);
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionObjectSchema[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   
-  const [currentRecordedAudioUri, setCurrentRecordedAudioUri] = useState<string | null>(null);
+  const [currentRecordedVideoUri, setCurrentRecordedVideoUri] = useState<string | null>(null);
   const [currentTranscribedAnswer, setCurrentTranscribedAnswer] = useState<string | null>(null);
   const [currentEvaluation, setCurrentEvaluation] = useState<EvaluateAnswerOutput | null>(null);
+  const [currentVideoAnalysis, setCurrentVideoAnalysis] = useState<AnalyzeVideoPerformanceOutput | null>(null);
   
   const [interviewLog, setInterviewLog] = useState<InterviewLog[]>([]);
   
@@ -95,7 +102,7 @@ export default function InterviewPage() {
         setParsedResumeData(parsedData);
         const summaryString = `Work Experience: ${parsedData.workExperience.join(', ') || 'N/A'}. Skills: ${parsedData.skills.join(', ') || 'N/A'}. Projects: ${parsedData.projects.join(', ') || 'N/A'}.`;
         setParsedResumeString(summaryString);
-        setStage('AWAITING_NUM_QUESTIONS'); // Go to new stage
+        setStage('AWAITING_NUM_QUESTIONS');
         setIsLoading(false);
         toast({ title: "Resume Parsed", description: "Your resume has been successfully parsed." });
       };
@@ -137,50 +144,68 @@ export default function InterviewPage() {
   const handleStartInterview = () => {
     setCurrentQuestionIndex(0);
     setInterviewLog([]);
-    setCurrentRecordedAudioUri(null);
+    setCurrentRecordedVideoUri(null);
     setCurrentTranscribedAnswer(null);
     setCurrentEvaluation(null);
+    setCurrentVideoAnalysis(null);
     setStage('INTERVIEWING');
   };
   
-  const handleAudioSubmission = useCallback(async (audioDataUri: string) => {
-    setCurrentRecordedAudioUri(audioDataUri);
+  const handleVideoSubmission = useCallback(async (videoDataUri: string) => {
+    setCurrentRecordedVideoUri(videoDataUri);
     setIsLoading(true);
-    setLoadingMessage('Processing your answer (transcribing & evaluating)...');
+    setLoadingMessage('Processing your answer (transcribing, evaluating & analyzing video)...');
     setStage('PROCESSING_ANSWER');
     setErrorMessage(null);
     const currentQuestionObject = generatedQuestions[currentQuestionIndex];
 
     try {
-      setLoadingMessage('Transcribing your answer...');
-      const transcriptionResult: TranscribeAnswerOutput = await transcribeAnswer({ audioDataUri });
-      setCurrentTranscribedAnswer(transcriptionResult.transcription);
-      
-      setLoadingMessage('Evaluating your answer...');
       if (!parsedResumeString || !currentQuestionObject?.question) {
         throw new Error("Missing data for evaluation.");
       }
-      const evaluationResult: EvaluateAnswerOutput = await evaluateAnswer({
+      
+      setLoadingMessage('Analyzing your performance...');
+      
+      // Start transcription and video analysis in parallel
+      const transcribePromise = transcribeAnswer({ audioDataUri: videoDataUri });
+      const videoAnalysisPromise = analyzeVideoPerformance({ videoDataUri });
+
+      // Wait for transcription to finish, as evaluation depends on it
+      const transcriptionResult = await transcribePromise;
+      const transcription = transcriptionResult.transcription;
+      setCurrentTranscribedAnswer(transcription);
+
+      // Now start the evaluation, which needs the transcription
+      const evaluatePromise = evaluateAnswer({
         question: currentQuestionObject.question,
-        answer: transcriptionResult.transcription,
+        answer: transcription,
         resumeData: parsedResumeString,
       });
-      setCurrentEvaluation(evaluationResult);
+
+      // Wait for the remaining promises to resolve
+      const [videoAnalysisResult, finalEvaluationResult] = await Promise.all([
+        videoAnalysisPromise,
+        evaluatePromise
+      ]);
+
+      setCurrentVideoAnalysis(videoAnalysisResult);
+      setCurrentEvaluation(finalEvaluationResult);
 
       setInterviewLog(prevLog => [
         ...prevLog,
         {
           question: currentQuestionObject.question,
           guidanceLink: currentQuestionObject.guidanceLink,
-          audioUri: audioDataUri,
-          transcribedAnswer: transcriptionResult.transcription,
-          evaluation: evaluationResult,
+          videoUri: videoDataUri,
+          transcribedAnswer: transcription,
+          evaluation: finalEvaluationResult,
+          videoAnalysis: videoAnalysisResult,
         }
       ]);
 
       setStage('QUESTION_EVALUATED');
       setIsLoading(false);
-      toast({ title: "Answer Processed", description: "Your answer has been transcribed and evaluated." });
+      toast({ title: "Answer Processed", description: "Your answer has been fully analyzed." });
 
     } catch (error) {
       handleError('Failed to process your answer.', error);
@@ -189,20 +214,23 @@ export default function InterviewPage() {
         {
           question: currentQuestionObject?.question || "Unknown Question",
           guidanceLink: currentQuestionObject?.guidanceLink,
-          audioUri: audioDataUri,
+          videoUri: videoDataUri,
           transcribedAnswer: currentTranscribedAnswer, 
           evaluation: null,
+          videoAnalysis: currentVideoAnalysis,
         }
       ]);
     }
-  }, [generatedQuestions, currentQuestionIndex, parsedResumeString, handleError, toast, currentTranscribedAnswer]);
+  }, [generatedQuestions, currentQuestionIndex, parsedResumeString, handleError, toast, currentTranscribedAnswer, currentVideoAnalysis]);
+
 
   const handleNextQuestion = () => {
     if (currentQuestionIndex < generatedQuestions.length - 1) {
       setCurrentQuestionIndex(prev => prev + 1);
-      setCurrentRecordedAudioUri(null);
+      setCurrentRecordedVideoUri(null);
       setCurrentTranscribedAnswer(null);
       setCurrentEvaluation(null);
+      setCurrentVideoAnalysis(null);
       setStage('INTERVIEWING');
     } else {
       setStage('INTERVIEW_COMPLETE');
@@ -227,10 +255,11 @@ export default function InterviewPage() {
     setParsedResumeString('');
     setGeneratedQuestions([]);
     setCurrentQuestionIndex(0);
-    setNumberOfQuestions(5);
-    setCurrentRecordedAudioUri(null);
+    setNumberOfQuestions(3);
+    setCurrentRecordedVideoUri(null);
     setCurrentTranscribedAnswer(null);
     setCurrentEvaluation(null);
+    setCurrentVideoAnalysis(null);
     setInterviewLog([]);
     setIsLoading(false);
     setLoadingMessage('');
@@ -309,7 +338,7 @@ export default function InterviewPage() {
             </CardHeader>
             <CardContent>
               <Button onClick={handleStartInterview} size="lg" className="w-full">
-                <Mic className="mr-2 h-5 w-5" /> Start Interview
+                <Video className="mr-2 h-5 w-5" /> Start Video Interview
               </Button>
             </CardContent>
           </Card>
@@ -349,7 +378,7 @@ export default function InterviewPage() {
               )}
             </CardHeader>
             <CardContent>
-              <VoiceRecorder onRecordingComplete={handleAudioSubmission} isProcessing={isLoading} />
+              <VideoRecorder onRecordingComplete={handleVideoSubmission} isProcessing={isLoading} />
             </CardContent>
           </Card>
         );
@@ -363,6 +392,9 @@ export default function InterviewPage() {
               evaluation={currentEvaluation?.evaluation ?? null}
               score={currentEvaluation?.score ?? null}
               followUpQuestion={currentEvaluation?.followUpQuestion ?? null}
+              expectedAnswerElements={currentEvaluation?.expectedAnswerElements ?? null}
+              suggestedResources={currentEvaluation?.suggestedResources ?? null}
+              videoAnalysis={currentVideoAnalysis}
             />
             <Button onClick={handleNextQuestion} size="lg" className="w-full">
               {currentQuestionIndex < generatedQuestions.length - 1 ? 'Next Question' : 'Finish Interview'}
