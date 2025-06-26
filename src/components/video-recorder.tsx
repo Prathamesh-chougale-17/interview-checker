@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Mic, StopCircle, AlertTriangle, Video, VideoOff, Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import * as faceapi from 'face-api.js';
+import { FaceLandmarker, FilesetResolver, FaceLandmarkerResult } from '@mediapipe/tasks-vision';
 
 interface VideoRecorderProps {
   onRecordingComplete: (videoDataUri: string, facialData: any[]) => void;
@@ -18,20 +18,50 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
   const [videoDataUri, setVideoDataUri] = useState<string | null>(null);
   const [hasCameraPermission, setHasCameraPermission] = useState<boolean | null>(null);
   const [isBrowserSupported, setIsBrowserSupported] = useState(true);
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  
+  const [faceLandmarker, setFaceLandmarker] = useState<FaceLandmarker | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const videoChunksRef = useRef<Blob[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const animationFrameIdRef = useRef<number | null>(null);
   const facialDataRef = useRef<any[]>([]);
   
   const { toast } = useToast();
 
+  // Initialize MediaPipe FaceLandmarker
   useEffect(() => {
+    const createFaceLandmarker = async () => {
+      try {
+        const filesetResolver = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+        const landmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+          baseOptions: {
+            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+            delegate: "GPU"
+          },
+          outputFaceBlendshapes: true,
+          runningMode: "VIDEO",
+          numFaces: 1
+        });
+        setFaceLandmarker(landmarker);
+      } catch (error) {
+        console.error("Error creating FaceLandmarker:", error);
+        toast({
+          title: "AI Model Error",
+          description: "Could not load facial recognition models. Performance analysis will be disabled.",
+          variant: "destructive"
+        });
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
     if (typeof window !== 'undefined' && (!navigator.mediaDevices || !window.MediaRecorder)) {
       setIsBrowserSupported(false);
+      setIsInitializing(false);
       toast({
         title: "Browser Not Supported",
         description: "Video recording is not supported by your browser.",
@@ -41,26 +71,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       return;
     }
 
-    const loadModels = async () => {
-      const MODEL_URL = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights';
-      try {
-        await Promise.all([
-          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-          faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
-        ]);
-        setModelsLoaded(true);
-      } catch (error) {
-        console.error("Failed to load face-api models:", error);
-        toast({
-          title: "AI Model Error",
-          description: "Could not load facial recognition models from CDN. Performance analysis will be disabled.",
-          variant: "destructive"
-        });
-      }
-    };
-    loadModels();
-
+    createFaceLandmarker();
   }, [toast]);
   
   const getCameraPermission = useCallback(async () => {
@@ -93,29 +104,37 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
-      if(detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current);
+      if(animationFrameIdRef.current) {
+        cancelAnimationFrame(animationFrameIdRef.current);
       }
     };
   }, [getCameraPermission]);
 
-  const handleDetection = async () => {
-    if (videoRef.current && modelsLoaded && !videoRef.current.paused) {
-      const detections = await faceapi.detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions()).withFaceExpressions();
-      if (detections) {
-        facialDataRef.current.push({
-          timestamp: Date.now(),
-          expressions: detections.expressions
-        });
-      } else {
-        // Push null if no face is detected, to indicate a gap
-        facialDataRef.current.push(null);
-      }
+  const predictWebcam = useCallback(() => {
+    if (!isRecording || !faceLandmarker || !videoRef.current || videoRef.current.paused || videoRef.current.ended) {
+      return;
     }
-  };
+  
+    const startTimeMs = performance.now();
+    const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(videoRef.current, startTimeMs);
+  
+    if (results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+      // We are only detecting one face, so we take the first element
+      facialDataRef.current.push({
+        timestamp: Date.now(),
+        blendshapes: results.faceBlendshapes[0].categories,
+      });
+    } else {
+      // Push null if no face is detected
+      facialDataRef.current.push(null);
+    }
+  
+    // Continue the loop
+    animationFrameIdRef.current = requestAnimationFrame(predictWebcam);
+  }, [isRecording, faceLandmarker]);
 
   const startRecording = useCallback(async () => {
-    if (!isBrowserSupported || !hasCameraPermission || !streamRef.current || !modelsLoaded) {
+    if (!isBrowserSupported || !hasCameraPermission || !streamRef.current || !faceLandmarker) {
         toast({ title: "Cannot Start Recording", description: "Camera is not ready, permissions denied, or AI models are not loaded.", variant: "destructive" });
         return;
     }
@@ -131,8 +150,8 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       };
 
       mediaRecorderRef.current.onstop = () => {
-        if(detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
-        detectionIntervalRef.current = null;
+        if(animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
+        animationFrameIdRef.current = null;
 
         const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
         const reader = new FileReader();
@@ -145,11 +164,12 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       };
 
       mediaRecorderRef.current.start();
-      detectionIntervalRef.current = setInterval(handleDetection, 1000); // Run detection every second
       setIsRecording(true);
+      // Start the prediction loop
+      animationFrameIdRef.current = requestAnimationFrame(predictWebcam);
     } catch (err) {
       console.error("Error starting recording:", err);
-      if(detectionIntervalRef.current) clearInterval(detectionIntervalRef.current);
+      if(animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current);
       toast({
         title: "Recording Error",
         description: "Could not start the video recording.",
@@ -157,12 +177,13 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       });
       setIsRecording(false);
     }
-  }, [onRecordingComplete, toast, isBrowserSupported, hasCameraPermission, modelsLoaded]);
+  }, [onRecordingComplete, toast, isBrowserSupported, hasCameraPermission, faceLandmarker, predictWebcam]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      // The predictWebcam loop will stop itself because isRecording is false
     }
   }, [isRecording]);
 
@@ -170,7 +191,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
     <div className="flex flex-col items-center space-y-4 p-4 border rounded-lg shadow-sm bg-muted/20">
       <div className="w-full aspect-video bg-black rounded-md overflow-hidden relative flex items-center justify-center">
         <video ref={videoRef} className="w-full h-full object-cover" autoPlay muted playsInline />
-        {!modelsLoaded && hasCameraPermission && (
+        {(isInitializing || (hasCameraPermission && !faceLandmarker)) && (
             <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/50 p-4">
                 <Loader2 className="h-8 w-8 animate-spin mb-2" />
                 <p>Loading AI models...</p>
@@ -184,7 +205,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
                 <Button onClick={getCameraPermission} variant="secondary" size="sm" className="mt-4">Retry Permissions</Button>
             </div>
         )}
-         {hasCameraPermission === null && !modelsLoaded && (
+         {hasCameraPermission === null && !isInitializing && (
              <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground">
                 <Video className="h-12 w-12 mb-4 animate-pulse" />
                 <p>Waiting for camera...</p>
@@ -194,7 +215,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
 
       <Button
         onClick={isRecording ? stopRecording : startRecording}
-        disabled={isProcessing || !hasCameraPermission || hasCameraPermission === null || !modelsLoaded}
+        disabled={isProcessing || !hasCameraPermission || hasCameraPermission === null || !faceLandmarker || isInitializing}
         variant={isRecording ? "destructive" : "default"}
         size="lg"
         className="w-full"
