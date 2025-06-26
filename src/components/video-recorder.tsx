@@ -77,22 +77,28 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
   const predictWebcam = useCallback(() => {
     const video = videoRef.current;
     if (!video || !faceLandmarker) {
+      if (animationFrameIdRef.current) {
+        window.requestAnimationFrame(predictWebcam);
+      }
       return;
     }
 
     // If the video is playing, start detecting
-    if (video.currentTime > 0) {
+    if (video.readyState >= 2) { // Check if video has enough data to play
       const startTimeMs = performance.now();
       const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(video, startTimeMs);
 
-      // If recording, save the results
-      if (isRecordingRef.current && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
-        facialDataRef.current.push({
-          timestamp: Date.now(),
-          blendshapes: results.faceBlendshapes[0].categories,
-        });
-      } else if (isRecordingRef.current) {
-        facialDataRef.current.push(null);
+      // Add a null check for robustness
+      if(results) {
+        // If recording, save the results
+        if (isRecordingRef.current && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+          facialDataRef.current.push({
+            timestamp: Date.now(),
+            blendshapes: results.faceBlendshapes[0].categories,
+          });
+        } else if (isRecordingRef.current) {
+          facialDataRef.current.push(null);
+        }
       }
     }
 
@@ -109,7 +115,9 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.addEventListener("loadeddata", predictWebcam);
+        videoRef.current.addEventListener("loadeddata", () => {
+            animationFrameIdRef.current = window.requestAnimationFrame(predictWebcam);
+        });
       }
       setHasCameraPermission(true);
     } catch (error) {
@@ -138,6 +146,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
         }
         if (animationFrameIdRef.current) {
             window.cancelAnimationFrame(animationFrameIdRef.current);
+            animationFrameIdRef.current = null;
         }
     }
   }, []); // Empty dependency array ensures this runs only on unmount
