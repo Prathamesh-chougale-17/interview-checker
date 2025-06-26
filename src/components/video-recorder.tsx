@@ -109,9 +109,7 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.addEventListener("loadeddata", () => {
-            animationFrameIdRef.current = window.requestAnimationFrame(predictWebcam);
-        });
+        videoRef.current.addEventListener("loadeddata", predictWebcam);
       }
       setHasCameraPermission(true);
     } catch (error) {
@@ -125,27 +123,33 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
     }
   }, [faceLandmarker, hasCameraPermission, predictWebcam, toast]);
 
+  // Effect to automatically enable camera once ready
   useEffect(() => {
     if (!isInitializing) {
         enableCam();
     }
-    // Cleanup on unmount
+  }, [isInitializing, enableCam]);
+
+  // Effect to handle component cleanup ONCE on unmount
+  useEffect(() => {
     return () => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
         }
         if (animationFrameIdRef.current) {
-            cancelAnimationFrame(animationFrameIdRef.current);
+            window.cancelAnimationFrame(animationFrameIdRef.current);
         }
     }
-  }, [isInitializing, enableCam]);
+  }, []); // Empty dependency array ensures this runs only on unmount
 
 
   const startRecording = () => {
-    if (!streamRef.current) {
-        toast({ title: "Camera not ready", variant: "destructive" });
+    if (!streamRef.current || !streamRef.current.active) {
+        toast({ title: "Camera not ready", description: "The camera stream is not active. Please try again.", variant: "destructive" });
+        enableCam();
         return;
     }
+
     setVideoDataUri(null);
     facialDataRef.current = [];
     videoChunksRef.current = [];
