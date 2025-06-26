@@ -58,12 +58,7 @@ const analyzeVideoPerformanceFlow = ai.defineFlow(
     outputSchema: AnalyzeVideoPerformanceOutputSchema,
   },
   async input => {
-    // Using a standard model as video processing is no longer needed
-    const {output} = await ai.generate({
-        model: 'googleai/gemini-2.0-flash',
-        prompt: prompt.render(input),
-        output: {schema: AnalyzeVideoPerformanceOutputSchema},
-    });
+    const {output} = await prompt(input);
     return output!;
   }
 );
