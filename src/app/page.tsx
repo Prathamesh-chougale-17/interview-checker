@@ -10,14 +10,13 @@ import type { TranscribeAnswerOutput } from '@/ai/flows/transcribe-answer';
 import { transcribeAnswer } from '@/ai/flows/transcribe-answer';
 import type { EvaluateAnswerOutput } from '@/ai/flows/evaluate-answer';
 import { evaluateAnswer } from '@/ai/flows/evaluate-answer';
-// New import for video analysis
+// Import for facial data analysis
 import type { AnalyzeVideoPerformanceOutput } from '@/ai/flows/analyze-video-performance';
 import { analyzeVideoPerformance } from '@/ai/flows/analyze-video-performance';
 
 
 import { AppHeader } from '@/components/app-header';
 import { ResumeUploader } from '@/components/resume-uploader';
-// Renamed import
 import { VideoRecorder } from '@/components/video-recorder';
 import { AnswerEvaluation } from '@/components/answer-evaluation';
 import { LoadingIndicator } from '@/components/loading-indicator';
@@ -151,10 +150,10 @@ export default function InterviewPage() {
     setStage('INTERVIEWING');
   };
   
-  const handleVideoSubmission = useCallback(async (videoDataUri: string) => {
+  const handleVideoSubmission = useCallback(async (videoDataUri: string, facialData: any[]) => {
     setCurrentRecordedVideoUri(videoDataUri);
     setIsLoading(true);
-    setLoadingMessage('Processing your answer (transcribing, evaluating & analyzing video)...');
+    setLoadingMessage('Processing your answer (transcribing, evaluating & analyzing performance)...');
     setStage('PROCESSING_ANSWER');
     setErrorMessage(null);
     const currentQuestionObject = generatedQuestions[currentQuestionIndex];
@@ -166,9 +165,11 @@ export default function InterviewPage() {
       
       setLoadingMessage('Analyzing your performance...');
       
-      // Start transcription and video analysis in parallel
+      // Start transcription and facial data analysis in parallel
       const transcribePromise = transcribeAnswer({ audioDataUri: videoDataUri });
-      const videoAnalysisPromise = analyzeVideoPerformance({ videoDataUri });
+      
+      const facialDataJson = JSON.stringify(facialData);
+      const videoAnalysisPromise = analyzeVideoPerformance({ facialDataJson });
 
       // Wait for transcription to finish, as evaluation depends on it
       const transcriptionResult = await transcribePromise;
