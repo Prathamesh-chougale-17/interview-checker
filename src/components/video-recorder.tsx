@@ -27,8 +27,13 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameIdRef = useRef<number | null>(null);
   const facialDataRef = useRef<any[]>([]);
+  const isRecordingRef = useRef(isRecording);
   
   const { toast } = useToast();
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   // 1. Initialize MediaPipe FaceLandmarker
   useEffect(() => {
@@ -81,19 +86,19 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
       const results: FaceLandmarkerResult = faceLandmarker.detectForVideo(video, startTimeMs);
 
       // If recording, save the results
-      if (isRecording && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
+      if (isRecordingRef.current && results.faceBlendshapes && results.faceBlendshapes.length > 0) {
         facialDataRef.current.push({
           timestamp: Date.now(),
           blendshapes: results.faceBlendshapes[0].categories,
         });
-      } else if (isRecording) {
+      } else if (isRecordingRef.current) {
         facialDataRef.current.push(null);
       }
     }
 
     // Call this function again to keep predicting when the browser is ready.
     animationFrameIdRef.current = window.requestAnimationFrame(predictWebcam);
-  }, [faceLandmarker, isRecording]);
+  }, [faceLandmarker]);
 
   // 3. Get camera permissions and start the prediction loop
   const enableCam = useCallback(async () => {
@@ -145,32 +150,43 @@ export const VideoRecorder: FC<VideoRecorderProps> = ({ onRecordingComplete, isP
     facialDataRef.current = [];
     videoChunksRef.current = [];
     
-    mediaRecorderRef.current = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' });
-    
-    mediaRecorderRef.current.ondataavailable = (event) => {
-        videoChunksRef.current.push(event.data);
-    };
+    try {
+      mediaRecorderRef.current = new MediaRecorder(streamRef.current, { mimeType: 'video/webm' });
+      
+      mediaRecorderRef.current.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            videoChunksRef.current.push(event.data);
+          }
+      };
 
-    mediaRecorderRef.current.onstop = () => {
-        const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const base64String = reader.result as string;
-            setVideoDataUri(base64String);
-            onRecordingComplete(base64String, facialDataRef.current);
-        };
-        reader.readAsDataURL(videoBlob);
-    };
+      mediaRecorderRef.current.onstop = () => {
+          const videoBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+          const reader = new FileReader();
+          reader.onloadend = () => {
+              const base64String = reader.result as string;
+              setVideoDataUri(base64String);
+              onRecordingComplete(base64String, facialDataRef.current);
+          };
+          reader.readAsDataURL(videoBlob);
+      };
 
-    mediaRecorderRef.current.start();
-    setIsRecording(true);
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+       console.error("Error starting MediaRecorder:", error);
+       toast({
+         title: "Recording Error",
+         description: "Could not start video recording. Please ensure your browser supports WebM format and camera is not in use.",
+         variant: "destructive"
+       });
+    }
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current) {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.stop();
-      setIsRecording(false);
     }
+    setIsRecording(false);
   };
 
   return (
